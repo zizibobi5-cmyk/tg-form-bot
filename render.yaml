@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: tg-form-bot
+    runtime: python
+    plan: free
+    region: frankfurt
+    branch: main
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: BOT_TOKEN
+        sync: false
+      - key: CHANNEL_ID
+        sync: false
+      - key: MODERATOR_CHAT_ID
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ANTIFLOOD_SECONDS
+        value: "3"
+      - key: MAX_APPROVED_PER_USER
+        value: "30"
+      - key: MAX_PHOTOS
+        value: "10"
+      - key: MIN_PHOTOS
+        value: "1"
+      - key: RULES_URL
+        sync: false
+      - key: CHANNEL_DELAY_BETWEEN_TEXTS
+        value: "5"
+      - key: CHANNEL_DELAY_BEFORE_PHOTOS
+        value: "15"
