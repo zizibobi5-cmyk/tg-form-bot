@@ -126,62 +126,78 @@ def _validate_text(value: str, *, limit: int, min_len: int = 1) -> tuple[bool, s
     return True, None
 
 
+def _capture(message: Message) -> tuple[str, str]:
+    """Возвращает (visible_text, html_text).
+
+    visible_text — для валидации длины (видимые символы).
+    html_text — для хранения и публикации (сохраняет премиум-эмодзи, ссылки, форматирование).
+    """
+    visible = (message.text or "").strip()
+    if not visible:
+        return "", ""
+    try:
+        html = (message.html_text or "").strip()
+    except (AttributeError, TypeError):
+        html = visible
+    return visible, html
+
+
 @router.message(ApplicationForm.name_surname, F.text)
 async def step_name_surname(message: Message, state: FSMContext) -> None:
-    text = (message.text or "").strip()
+    text, html = _capture(message)
     ok, err = _validate_text(text, limit=texts.NAME_SURNAME_MAX)
     if not ok:
         await message.answer(err or texts.ERROR_GENERIC)
         return
-    await state.update_data(name_surname=text)
+    await state.update_data(name_surname=html)
     await state.set_state(ApplicationForm.age_height)
     await message.answer(texts.ASK_AGE_HEIGHT, reply_markup=cancel_kb())
 
 
 @router.message(ApplicationForm.age_height, F.text)
 async def step_age_height(message: Message, state: FSMContext) -> None:
-    text = (message.text or "").strip()
+    text, html = _capture(message)
     ok, err = _validate_text(text, limit=texts.AGE_HEIGHT_MAX)
     if not ok:
         await message.answer(err or texts.ERROR_GENERIC)
         return
-    await state.update_data(age_height=text)
+    await state.update_data(age_height=html)
     await state.set_state(ApplicationForm.magic_abilities)
     await message.answer(texts.ASK_MAGIC, reply_markup=cancel_kb())
 
 
 @router.message(ApplicationForm.magic_abilities, F.text)
 async def step_magic(message: Message, state: FSMContext) -> None:
-    text = (message.text or "").strip()
+    text, html = _capture(message)
     ok, err = _validate_text(text, limit=texts.MAGIC_MAX)
     if not ok:
         await message.answer(err or texts.ERROR_GENERIC)
         return
-    await state.update_data(magic_abilities=text)
+    await state.update_data(magic_abilities=html)
     await state.set_state(ApplicationForm.character)
     await message.answer(texts.ASK_CHARACTER, reply_markup=cancel_kb())
 
 
 @router.message(ApplicationForm.character, F.text)
 async def step_character(message: Message, state: FSMContext) -> None:
-    text = (message.text or "").strip()
+    text, html = _capture(message)
     ok, err = _validate_text(text, limit=texts.CHARACTER_MAX)
     if not ok:
         await message.answer(err or texts.ERROR_GENERIC)
         return
-    await state.update_data(character=text)
+    await state.update_data(character=html)
     await state.set_state(ApplicationForm.biography)
     await message.answer(texts.ASK_BIOGRAPHY, reply_markup=cancel_kb())
 
 
 @router.message(ApplicationForm.biography, F.text)
 async def step_biography(message: Message, state: FSMContext) -> None:
-    text = (message.text or "").strip()
+    text, html = _capture(message)
     ok, err = _validate_text(text, limit=texts.BIOGRAPHY_MAX, min_len=texts.BIOGRAPHY_MIN)
     if not ok:
         await message.answer(err or texts.ERROR_GENERIC)
         return
-    await state.update_data(biography=text)
+    await state.update_data(biography=html)
     await state.set_state(ApplicationForm.interesting_facts)
     await message.answer(texts.ASK_FACTS, reply_markup=skip_cancel_kb())
 
@@ -195,24 +211,24 @@ async def step_facts_skip(message: Message, state: FSMContext) -> None:
 
 @router.message(ApplicationForm.interesting_facts, F.text)
 async def step_facts(message: Message, state: FSMContext) -> None:
-    text = (message.text or "").strip()
+    text, html = _capture(message)
     ok, err = _validate_text(text, limit=texts.FACTS_MAX)
     if not ok:
         await message.answer(err or texts.ERROR_GENERIC)
         return
-    await state.update_data(interesting_facts=text)
+    await state.update_data(interesting_facts=html)
     await state.set_state(ApplicationForm.work_position)
     await message.answer(texts.ASK_WORK, reply_markup=cancel_kb())
 
 
 @router.message(ApplicationForm.work_position, F.text)
 async def step_work(message: Message, state: FSMContext) -> None:
-    text = (message.text or "").strip()
+    text, html = _capture(message)
     ok, err = _validate_text(text, limit=texts.WORK_MAX)
     if not ok:
         await message.answer(err or texts.ERROR_GENERIC)
         return
-    await state.update_data(work_position=text)
+    await state.update_data(work_position=html)
     await state.set_state(ApplicationForm.place_of_living)
     await message.answer(texts.ASK_PLACE, reply_markup=skip_cancel_kb())
 
@@ -226,24 +242,24 @@ async def step_place_skip(message: Message, state: FSMContext) -> None:
 
 @router.message(ApplicationForm.place_of_living, F.text)
 async def step_place(message: Message, state: FSMContext) -> None:
-    text = (message.text or "").strip()
+    text, html = _capture(message)
     ok, err = _validate_text(text, limit=texts.PLACE_MAX)
     if not ok:
         await message.answer(err or texts.ERROR_GENERIC)
         return
-    await state.update_data(place_of_living=text)
+    await state.update_data(place_of_living=html)
     await state.set_state(ApplicationForm.roll)
     await message.answer(texts.ASK_ROLL, reply_markup=cancel_kb())
 
 
 @router.message(ApplicationForm.roll, F.text)
 async def step_roll(message: Message, state: FSMContext) -> None:
-    text = (message.text or "").strip()
+    text, html = _capture(message)
     ok, err = _validate_text(text, limit=texts.ROLL_MAX)
     if not ok:
         await message.answer(err or texts.ERROR_GENERIC)
         return
-    await state.update_data(roll=text)
+    await state.update_data(roll=html)
     settings = get_settings()
     await state.update_data(photos=[])
     await state.set_state(ApplicationForm.photos)

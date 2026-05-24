@@ -46,27 +46,32 @@ def render_application(
     roll: str,
     username: str | None,
 ) -> str:
-    """Подставляет поля анкеты в шаблон публикации. Все пользовательские значения экранируются."""
+    """Подставляет поля анкеты в шаблон публикации.
+
+    Поля приходят уже как Telegram-HTML (`message.html_text`) — это сохраняет
+    премиум-эмодзи (`<tg-emoji>`), ссылки и форматирование. Поэтому экранирование
+    тут не нужно: aiogram сам корректно сериализовал и экранировал текст.
+    """
     facts_block = (
-        texts.OPTIONAL_FACTS_BLOCK.format(value=escape(interesting_facts))
+        texts.OPTIONAL_FACTS_BLOCK.format(value=interesting_facts)
         if interesting_facts
         else ""
     )
     place_block = (
-        texts.OPTIONAL_PLACE_BLOCK.format(value=escape(place_of_living))
+        texts.OPTIONAL_PLACE_BLOCK.format(value=place_of_living)
         if place_of_living
         else ""
     )
     return texts.APPLICATION_TEMPLATE.format(
-        name_surname=escape(name_surname),
-        age_height=escape(age_height),
-        magic_abilities=escape(magic_abilities),
-        character=escape(character),
-        biography=escape(biography),
+        name_surname=name_surname,
+        age_height=age_height,
+        magic_abilities=magic_abilities,
+        character=character,
+        biography=biography,
         interesting_facts_block=facts_block,
-        work_position=escape(work_position),
+        work_position=work_position,
         place_of_living_block=place_block,
-        roll=escape(roll),
+        roll=roll,
         username=_username_block(username),
     )
 
