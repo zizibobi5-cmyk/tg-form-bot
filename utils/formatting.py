@@ -8,7 +8,7 @@ from aiogram.types import User as TgUser
 import texts
 
 TELEGRAM_MESSAGE_LIMIT = 4096
-MAX_MESSAGES_PER_APPLICATION = 3  # "не больше 3х тг лимитов"
+MAX_MESSAGES_PER_APPLICATION = 7  # анкета может растянуться до 7 тг-сообщений
 MAX_APPLICATION_BODY = TELEGRAM_MESSAGE_LIMIT * MAX_MESSAGES_PER_APPLICATION
 
 
