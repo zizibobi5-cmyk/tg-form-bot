@@ -47,6 +47,13 @@ class Application(Base):
     place_of_living: Mapped[str | None] = mapped_column(Text, nullable=True)
     roll: Mapped[str] = mapped_column(Text, nullable=False)
 
+    # ID приватного чата с ботом и message_id каждого поля анкеты в формате JSON
+    # ({field_name: message_id, ...}). Нужны, чтобы при публикации в канал можно было
+    # скопировать оригинальные сообщения через copy_message — это сохраняет премиум-эмодзи,
+    # которые иначе режутся при отправке ботом в канал.
+    user_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    field_message_ids: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     status: Mapped[ApplicationStatus] = mapped_column(
         Enum(ApplicationStatus, native_enum=False, length=16),
         default=ApplicationStatus.PENDING,

@@ -142,6 +142,16 @@ def _capture(message: Message) -> tuple[str, str]:
     return visible, html
 
 
+async def _remember_origin(message: Message, state: FSMContext, field: str) -> None:
+    """Запоминает chat_id и message_id поля в FSM, чтобы при публикации в канал
+    можно было скопировать оригинальное сообщение вместе с его custom_emoji entities.
+    """
+    data = await state.get_data()
+    field_msg_ids: dict[str, int] = dict(data.get("_field_msg_ids") or {})
+    field_msg_ids[field] = message.message_id
+    await state.update_data(_field_msg_ids=field_msg_ids, _user_chat_id=message.chat.id)
+
+
 @router.message(ApplicationForm.name_surname, F.text)
 async def step_name_surname(message: Message, state: FSMContext) -> None:
     text, html = _capture(message)
@@ -150,6 +160,7 @@ async def step_name_surname(message: Message, state: FSMContext) -> None:
         await message.answer(err or texts.ERROR_GENERIC)
         return
     await state.update_data(name_surname=html)
+    await _remember_origin(message, state, "name_surname")
     await state.set_state(ApplicationForm.age_height)
     await message.answer(texts.ASK_AGE_HEIGHT, reply_markup=cancel_kb())
 
@@ -162,6 +173,7 @@ async def step_age_height(message: Message, state: FSMContext) -> None:
         await message.answer(err or texts.ERROR_GENERIC)
         return
     await state.update_data(age_height=html)
+    await _remember_origin(message, state, "age_height")
     await state.set_state(ApplicationForm.magic_abilities)
     await message.answer(texts.ASK_MAGIC, reply_markup=cancel_kb())
 
@@ -174,6 +186,7 @@ async def step_magic(message: Message, state: FSMContext) -> None:
         await message.answer(err or texts.ERROR_GENERIC)
         return
     await state.update_data(magic_abilities=html)
+    await _remember_origin(message, state, "magic_abilities")
     await state.set_state(ApplicationForm.character)
     await message.answer(texts.ASK_CHARACTER, reply_markup=cancel_kb())
 
@@ -186,6 +199,7 @@ async def step_character(message: Message, state: FSMContext) -> None:
         await message.answer(err or texts.ERROR_GENERIC)
         return
     await state.update_data(character=html)
+    await _remember_origin(message, state, "character")
     await state.set_state(ApplicationForm.biography)
     await message.answer(texts.ASK_BIOGRAPHY, reply_markup=cancel_kb())
 
@@ -198,6 +212,7 @@ async def step_biography(message: Message, state: FSMContext) -> None:
         await message.answer(err or texts.ERROR_GENERIC)
         return
     await state.update_data(biography=html)
+    await _remember_origin(message, state, "biography")
     await state.set_state(ApplicationForm.interesting_facts)
     await message.answer(texts.ASK_FACTS, reply_markup=skip_cancel_kb())
 
@@ -217,6 +232,7 @@ async def step_facts(message: Message, state: FSMContext) -> None:
         await message.answer(err or texts.ERROR_GENERIC)
         return
     await state.update_data(interesting_facts=html)
+    await _remember_origin(message, state, "interesting_facts")
     await state.set_state(ApplicationForm.work_position)
     await message.answer(texts.ASK_WORK, reply_markup=cancel_kb())
 
@@ -229,6 +245,7 @@ async def step_work(message: Message, state: FSMContext) -> None:
         await message.answer(err or texts.ERROR_GENERIC)
         return
     await state.update_data(work_position=html)
+    await _remember_origin(message, state, "work_position")
     await state.set_state(ApplicationForm.place_of_living)
     await message.answer(texts.ASK_PLACE, reply_markup=skip_cancel_kb())
 
@@ -248,6 +265,7 @@ async def step_place(message: Message, state: FSMContext) -> None:
         await message.answer(err or texts.ERROR_GENERIC)
         return
     await state.update_data(place_of_living=html)
+    await _remember_origin(message, state, "place_of_living")
     await state.set_state(ApplicationForm.roll)
     await message.answer(texts.ASK_ROLL, reply_markup=cancel_kb())
 
@@ -260,6 +278,7 @@ async def step_roll(message: Message, state: FSMContext) -> None:
         await message.answer(err or texts.ERROR_GENERIC)
         return
     await state.update_data(roll=html)
+    await _remember_origin(message, state, "roll")
     settings = get_settings()
     await state.update_data(photos=[])
     await state.set_state(ApplicationForm.photos)
@@ -416,6 +435,13 @@ async def preview_send(
     await get_or_create_user(session, call.from_user.id, call.from_user.username, call.from_user.full_name)
     username_at = call.from_user.username
 
+    field_msg_ids_raw = data.get("_field_msg_ids") or {}
+    field_msg_ids: dict[str, int] = {
+        str(k): int(v) for k, v in field_msg_ids_raw.items() if isinstance(v, int)
+    }
+    user_chat_id_raw = data.get("_user_chat_id")
+    user_chat_id: int | None = int(user_chat_id_raw) if isinstance(user_chat_id_raw, int) else None
+
     app = await create_application(
         session,
         user_id=call.from_user.id,
@@ -430,6 +456,8 @@ async def preview_send(
         place_of_living=data.get("place_of_living"),
         roll=str(data["roll"]),
         photo_file_ids=photos,
+        user_chat_id=user_chat_id,
+        field_message_ids=field_msg_ids,
     )
     await session.commit()
 

@@ -2,11 +2,79 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from aiogram import Bot
+from aiogram.exceptions import TelegramAPIError
 from aiogram.types import InlineKeyboardMarkup, InputMediaPhoto
 
 from utils.formatting import split_text_for_telegram
+
+logger = logging.getLogger(__name__)
+
+# Человекочитаемые лейблы полей анкеты — для подписи копируемых сообщений
+# при публикации в канал с премиум-эмодзи.
+FIELD_LABELS: dict[str, str] = {
+    "name_surname": "<b>Имя/Фамилия:</b>",
+    "age_height": "<b>Возраст/Рост:</b>",
+    "magic_abilities": "<b>Магические способности:</b>",
+    "character": "<b>Характер:</b>",
+    "biography": "<b>Биография:</b>",
+    "interesting_facts": "<b>Интересные факты:</b>",
+    "work_position": "<b>Место работы / должность / факультет / орден / фракции:</b>",
+    "place_of_living": "<b>Место проживания:</b>",
+    "roll": "<b>Ролл:</b>",
+}
+
+
+async def copy_emoji_fields(
+    bot: Bot,
+    chat_id: int,
+    user_chat_id: int,
+    field_message_ids: dict[str, int],
+    field_html_map: dict[str, str | None],
+    *,
+    header: str | None = None,
+) -> list[int]:
+    """Для полей, в чьём html есть `<tg-emoji ...>`, шлёт лейбл + copy_message оригинала.
+
+    Нужно, потому что Telegram режет custom_emoji из сообщений, которые бот шлёт
+    в канал, а `copy_message` сохраняет все entities исходного сообщения.
+    Если у поля нет message_id или пользователь удалил исходник — пропускаем молча.
+    """
+    fields_with_emoji: list[str] = [
+        name for name, html in field_html_map.items()
+        if html and "<tg-emoji " in html and field_message_ids.get(name)
+    ]
+    if not fields_with_emoji:
+        return []
+
+    sent_ids: list[int] = []
+    if header:
+        try:
+            msg = await bot.send_message(chat_id=chat_id, text=header)
+            sent_ids.append(msg.message_id)
+        except TelegramAPIError as e:
+            logger.warning("Failed to send emoji-copies header: %s", e)
+
+    for field_name in fields_with_emoji:
+        label = FIELD_LABELS.get(field_name, f"<b>{field_name}:</b>")
+        msg_id = int(field_message_ids[field_name])
+        try:
+            lbl_msg = await bot.send_message(chat_id=chat_id, text=label)
+            sent_ids.append(lbl_msg.message_id)
+            copied = await bot.copy_message(
+                chat_id=chat_id,
+                from_chat_id=user_chat_id,
+                message_id=msg_id,
+            )
+            sent_ids.append(copied.message_id)
+        except TelegramAPIError as e:
+            logger.warning(
+                "copy_message failed for field %s (user_chat=%s msg=%s): %s",
+                field_name, user_chat_id, msg_id, e,
+            )
+    return sent_ids
 
 
 async def _send_photos(bot: Bot, chat_id: int, photo_file_ids: list[str]) -> list[int]:
