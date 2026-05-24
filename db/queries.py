@@ -1,6 +1,8 @@
 """Высокоуровневые функции работы с БД."""
 from __future__ import annotations
 
+import json
+
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -112,7 +114,10 @@ async def create_application(
     place_of_living: str | None,
     roll: str,
     photo_file_ids: list[str],
+    user_chat_id: int | None = None,
+    field_message_ids: dict[str, int] | None = None,
 ) -> Application:
+    field_msg_ids_json = json.dumps(field_message_ids) if field_message_ids else None
     app = Application(
         user_id=user_id,
         username_at=username_at,
@@ -125,6 +130,8 @@ async def create_application(
         work_position=work_position,
         place_of_living=place_of_living,
         roll=roll,
+        user_chat_id=user_chat_id,
+        field_message_ids=field_msg_ids_json,
         status=ApplicationStatus.PENDING,
     )
     session.add(app)

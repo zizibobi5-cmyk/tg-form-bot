@@ -1,6 +1,7 @@
 """Хэндлеры модерации анкет."""
 from __future__ import annotations
 
+import json
 import logging
 
 from aiogram import Bot, F, Router
@@ -25,7 +26,7 @@ from db.queries import (
 from keyboards.user import resend_kb
 from states.moderation import ModerationFlow
 from utils.formatting import render_application
-from utils.messaging import send_application_messages
+from utils.messaging import copy_emoji_fields, send_application_messages
 from utils.permissions import is_authorized_moderator
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,42 @@ async def cb_accept(
         logger.exception("Failed to publish to channel: %s", e)
         await call.answer(texts.MOD_PUBLISH_FAILED.format(error=str(e)[:100]), show_alert=True)
         return
+
+    # Telegram режет custom_emoji в постах ботов на каналах. Для полей анкеты,
+    # где у пользователя были премиум-эмодзи, дополнительно копируем
+    # оригинальное сообщение из приватного чата через copy_message — копирование
+    # сохраняет все entities, включая custom_emoji.
+    if app.user_chat_id and app.field_message_ids:
+        try:
+            field_msg_ids: dict[str, int] = {
+                str(k): int(v) for k, v in json.loads(app.field_message_ids).items()
+            }
+        except (ValueError, TypeError) as e:
+            logger.warning("Failed to parse field_message_ids for app %s: %s", app.id, e)
+            field_msg_ids = {}
+        if field_msg_ids:
+            field_html_map: dict[str, str | None] = {
+                "name_surname": app.name_surname,
+                "age_height": app.age_height,
+                "magic_abilities": app.magic_abilities,
+                "character": app.character,
+                "biography": app.biography,
+                "interesting_facts": app.interesting_facts,
+                "work_position": app.work_position,
+                "place_of_living": app.place_of_living,
+                "roll": app.roll,
+            }
+            try:
+                await copy_emoji_fields(
+                    bot,
+                    chat_id=settings.channel_id,
+                    user_chat_id=int(app.user_chat_id),
+                    field_message_ids=field_msg_ids,
+                    field_html_map=field_html_map,
+                    header="💎 <b>Премиум-эмодзи (оригинал):</b>",
+                )
+            except TelegramAPIError as e:
+                logger.warning("Emoji-field copy step failed for app %s: %s", app.id, e)
 
     await approve_application(session, app_id, channel_message_id, moderator_id=call.from_user.id)
     await session.commit()

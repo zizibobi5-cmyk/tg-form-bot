@@ -60,3 +60,15 @@ async def init_db() -> None:
                 await conn.execute(
                     _sql_text(f"ALTER TABLE applications ALTER COLUMN {col} TYPE TEXT")
                 )
+            # Колонки для copy_message при публикации в канал (премиум-эмодзи).
+            # IF NOT EXISTS делает миграцию идемпотентной.
+            await conn.execute(
+                _sql_text(
+                    "ALTER TABLE applications ADD COLUMN IF NOT EXISTS user_chat_id BIGINT"
+                )
+            )
+            await conn.execute(
+                _sql_text(
+                    "ALTER TABLE applications ADD COLUMN IF NOT EXISTS field_message_ids TEXT"
+                )
+            )
