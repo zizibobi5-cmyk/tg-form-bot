@@ -33,7 +33,7 @@ ASK_BIOGRAPHY = (
 ASK_FACTS = (
     f"Шаг 6/{STEPS_COUNT}. <b>Интересные факты</b> (необязательно — можно пропустить):"
 )
-ASK_WORK = f"Шаг 7/{STEPS_COUNT}. <b>Место работы / должность / факультет / орден:</b>"
+ASK_WORK = f"Шаг 7/{STEPS_COUNT}. <b>Место работы / должность / факультет / орден / фракции:</b>"
 ASK_PLACE = (
     f"Шаг 8/{STEPS_COUNT}. <b>Место проживания</b> "
     "(только если персонаж — житель городка; можно пропустить):"
@@ -147,7 +147,7 @@ APPLICATION_TEMPLATE = (
     "<b>Характер:</b> {character}\n\n"
     "<b>Биография:</b>\n{biography}"
     "{interesting_facts_block}"
-    "\n\n<b>Место работы / должность / факультет / орден:</b> {work_position}"
+    "\n\n<b>Место работы / должность / факультет / орден / фракции:</b> {work_position}"
     "{place_of_living_block}"
     "\n\n<b>Ролл:</b> {roll}"
     "\n<b>Юзернейм:</b> {username}"
