@@ -37,8 +37,8 @@ class Application(Base):
     # фактический Telegram-юзернейм пользователя на момент подачи (для «Юзернейм:» в публикации)
     username_at: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
-    name_surname: Mapped[str] = mapped_column(String(256), nullable=False)
-    age_height: Mapped[str] = mapped_column(String(256), nullable=False)
+    name_surname: Mapped[str] = mapped_column(Text, nullable=False)
+    age_height: Mapped[str] = mapped_column(Text, nullable=False)
     magic_abilities: Mapped[str] = mapped_column(Text, nullable=False)
     character: Mapped[str] = mapped_column(Text, nullable=False)
     biography: Mapped[str] = mapped_column(Text, nullable=False)

@@ -62,8 +62,13 @@ async def question_received(
         await message.answer(f"Слишком длинное сообщение (макс. {QUESTION_MAX} символов).")
         return
 
+    try:
+        html_body = (message.html_text or "").strip() or text
+    except (AttributeError, TypeError):
+        html_body = text
+
     await get_or_create_user(session, message.from_user.id, message.from_user.username, message.from_user.full_name)
-    q = await create_question(session, message.from_user.id, text)
+    q = await create_question(session, message.from_user.id, html_body)
     await session.commit()
 
     settings = get_settings()
@@ -75,7 +80,7 @@ async def question_received(
     try:
         sent = await bot.send_message(
             chat_id=settings.moderator_chat_id,
-            text=f"{header}\n{text}",
+            text=f"{header}\n{html_body}",
             reply_markup=question_kb(q.id),
         )
         await set_question_mod_message(session, q.id, sent.chat.id, sent.message_id)
@@ -151,7 +156,12 @@ async def answer_received(
         await message.reply("Ответ не должен быть пустым.")
         return
 
-    q = await answer_question(session, int(q_id), answer_text)
+    try:
+        answer_html = (message.html_text or "").strip() or answer_text
+    except (AttributeError, TypeError):
+        answer_html = answer_text
+
+    q = await answer_question(session, int(q_id), answer_html)
     if q is None:
         await state.clear()
         await message.reply("Этот вопрос уже отвечен.")
@@ -162,7 +172,7 @@ async def answer_received(
     try:
         await bot.send_message(
             chat_id=q.user_id,
-            text=texts.USER_ANSWER_HEADER.format(answer=answer_text),
+            text=texts.USER_ANSWER_HEADER.format(answer=answer_html),
         )
         await message.reply(texts.MOD_ANSWER_OK)
         # убираем кнопку «Ответить» с исходной карточки

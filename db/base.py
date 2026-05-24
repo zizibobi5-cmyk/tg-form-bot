@@ -42,10 +42,21 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 
 async def init_db() -> None:
-    """Создаёт таблицы, если их ещё нет."""
+    """Создаёт таблицы, если их ещё нет, и подтягивает простые миграции схемы."""
     # импорт нужен, чтобы модели зарегистрировались в metadata
     from db import models  # noqa: F401
 
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Миграция: в старых развёртываниях name_surname/age_height имели VARCHAR(256),
+        # но HTML-форматированный текст (премиум-эмодзи) бывает длиннее. На Postgres
+        # расширяем колонки до TEXT. На SQLite VARCHAR(N) не ограничивает длину,
+        # поэтому миграция нужна только для PG.
+        backend = engine.url.get_backend_name()
+        if backend.startswith("postgres"):
+            from sqlalchemy import text as _sql_text
+            for col in ("name_surname", "age_height"):
+                await conn.execute(
+                    _sql_text(f"ALTER TABLE applications ALTER COLUMN {col} TYPE TEXT")
+                )
