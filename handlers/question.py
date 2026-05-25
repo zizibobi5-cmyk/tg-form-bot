@@ -13,6 +13,7 @@ import texts
 from config import get_settings
 from db.queries import (
     answer_question,
+    ban_user,
     create_question,
     get_or_create_user,
     get_question,
@@ -93,6 +94,51 @@ async def question_received(
 
     await state.clear()
     await message.answer(texts.QUESTION_SENT, reply_markup=main_menu())
+
+
+@router.callback_query(F.data.startswith("q:ban:"))
+async def cb_ban_from_question(
+    call: CallbackQuery, session: AsyncSession, bot: Bot
+) -> None:
+    if not isinstance(call.message, Message) or not _is_mod_chat(call.message.chat.id):
+        await call.answer()
+        return
+    if call.data is None or call.from_user is None:
+        await call.answer()
+        return
+    if not await is_authorized_moderator(session, call.from_user.id):
+        await call.answer(texts.MOD_NOT_AUTHORIZED, show_alert=True)
+        return
+    try:
+        q_id = int(call.data.split(":")[2])
+    except (IndexError, ValueError):
+        await call.answer()
+        return
+
+    q = await get_question(session, q_id)
+    if q is None:
+        await call.answer(texts.MOD_ALREADY_PROCESSED, show_alert=True)
+        try:
+            await call.message.edit_reply_markup(reply_markup=None)
+        except TelegramAPIError:
+            pass
+        return
+
+    await ban_user(session, q.user_id, reason="Забанен модератором в разделе «Задать вопрос»")
+    await session.commit()
+
+    try:
+        await call.message.edit_reply_markup(reply_markup=None)
+        await call.message.reply(f"Пользователь {q.user_id} забанен. Вопрос #{q_id} закрыт.")
+    except TelegramAPIError:
+        pass
+
+    await call.answer("OK")
+
+    try:
+        await bot.send_message(chat_id=q.user_id, text=texts.USER_BANNED)
+    except TelegramAPIError as e:
+        logger.warning("Failed to notify banned user %s: %s", q.user_id, e)
 
 
 @router.callback_query(F.data.startswith("q:answer:"))

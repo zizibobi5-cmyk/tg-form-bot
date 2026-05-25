@@ -20,5 +20,6 @@ def question_kb(q_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=texts.MOD_ANSWER_BTN, callback_data=f"q:answer:{q_id}")],
+            [InlineKeyboardButton(text=texts.MOD_BAN, callback_data=f"q:ban:{q_id}")],
         ]
     )
