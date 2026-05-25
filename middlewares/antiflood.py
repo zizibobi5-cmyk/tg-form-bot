@@ -12,6 +12,20 @@ from aiogram.types import CallbackQuery, Message, TelegramObject
 import texts
 from config import get_settings
 
+# Тексты кнопок reply-клавиатур: их нажатия не должны попадать под антифлуд,
+# иначе пользователь застревает в FSM, не может отменить шаг и т.п.
+_MENU_BUTTONS: frozenset[str] = frozenset(
+    {
+        texts.BTN_SEND_APPLICATION,
+        texts.BTN_ASK_QUESTION,
+        texts.BTN_RULES,
+        texts.BTN_SKIP,
+        texts.BTN_PHOTOS_DONE,
+        texts.BTN_PHOTOS_CLEAR,
+        texts.BTN_CANCEL,
+    }
+)
+
 
 class AntiFloodMiddleware(BaseMiddleware):
     def __init__(self) -> None:
@@ -34,6 +48,10 @@ class AntiFloodMiddleware(BaseMiddleware):
         if isinstance(event, Message) and event.from_user:
             # антифлуд применяем только к личке, чтобы не мешать модерационному чату
             if event.chat.type == "private":
+                # нажатия на кнопки меню пропускаем мимо антифлуда — это навигация,
+                # а не флуд: иначе юзер не может отменить шаг и считает, что бот висит
+                if (event.text or "") in _MENU_BUTTONS:
+                    return await handler(event, data)
                 user_id = event.from_user.id
         elif isinstance(event, CallbackQuery) and event.from_user:
             # callback'и в обоих случаях
