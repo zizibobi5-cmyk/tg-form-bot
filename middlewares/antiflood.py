@@ -7,6 +7,7 @@ import time
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, TelegramObject
 
 import texts
@@ -52,6 +53,14 @@ class AntiFloodMiddleware(BaseMiddleware):
                 # а не флуд: иначе юзер не может отменить шаг и считает, что бот висит
                 if (event.text or "") in _MENU_BUTTONS:
                     return await handler(event, data)
+                # если юзер сейчас в FSM (заполняет анкету или пишет вопрос) —
+                # шаги формы тоже не должны попадать под антифлуд, иначе он
+                # упирается в «слишком быстро» при быстром заполнении.
+                state = data.get("state")
+                if isinstance(state, FSMContext):
+                    current_state = await state.get_state()
+                    if current_state is not None:
+                        return await handler(event, data)
                 user_id = event.from_user.id
         elif isinstance(event, CallbackQuery) and event.from_user:
             # callback'и в обоих случаях
