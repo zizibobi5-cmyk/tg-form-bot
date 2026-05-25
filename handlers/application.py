@@ -5,6 +5,7 @@ import logging
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramAPIError
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -89,25 +90,9 @@ async def handle_resend_no(call: CallbackQuery) -> None:
 
 # --- Универсальная отмена внутри FSM ---
 
-_FORM_STATES = (
-    ApplicationForm.name_surname,
-    ApplicationForm.age_height,
-    ApplicationForm.magic_abilities,
-    ApplicationForm.character,
-    ApplicationForm.biography,
-    ApplicationForm.interesting_facts,
-    ApplicationForm.work_position,
-    ApplicationForm.place_of_living,
-    ApplicationForm.roll,
-    ApplicationForm.photos,
-)
 
-
-@router.message(F.text == texts.BTN_CANCEL)
+@router.message(StateFilter(ApplicationForm), F.text == texts.BTN_CANCEL)
 async def cancel_in_form(message: Message, state: FSMContext) -> None:
-    cur = await state.get_state()
-    if cur is None or cur.split(":")[0] != ApplicationForm.__name__:
-        return
     await state.clear()
     await message.answer(texts.APPLICATION_CANCELLED, reply_markup=main_menu())
 
