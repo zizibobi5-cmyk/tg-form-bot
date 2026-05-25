@@ -48,6 +48,24 @@ async def cmd_cancel(message: Message, state: FSMContext) -> None:
     await message.answer(texts.APPLICATION_CANCELLED, reply_markup=main_menu())
 
 
+# Глобальный обработчик «❌ Отмена» — должен срабатывать независимо от FSM-состояния,
+# в том числе когда состояние пустое (например, после рестарта сервиса состояние
+# в памяти теряется, а у юзера на экране остаётся клавиатура с «Отмена»).
+# Зарегистрирован в самом первом роутере, чтобы перехватывать кнопку раньше,
+# чем шаги форм/вопросов попытаются её обработать.
+@router.message(F.chat.type == "private", F.text == texts.BTN_CANCEL)
+async def handle_cancel_button(message: Message, state: FSMContext) -> None:
+    current = await state.get_state()
+    await state.clear()
+    if current and current.startswith("QuestionForm:"):
+        text = texts.QUESTION_CANCEL
+    elif current and current.startswith("ApplicationForm:"):
+        text = texts.APPLICATION_CANCELLED
+    else:
+        text = "Главное меню:"
+    await message.answer(text, reply_markup=main_menu())
+
+
 @router.message(F.chat.type == "private", F.text == texts.BTN_RULES)
 async def handle_rules(message: Message) -> None:
     settings = get_settings()

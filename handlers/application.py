@@ -5,7 +5,6 @@ import logging
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramAPIError
-from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,13 +87,7 @@ async def handle_resend_no(call: CallbackQuery) -> None:
         await call.message.answer(texts.APPLICATION_CANCELLED, reply_markup=main_menu())
 
 
-# --- Универсальная отмена внутри FSM ---
-
-
-@router.message(StateFilter(ApplicationForm), F.text == texts.BTN_CANCEL)
-async def cancel_in_form(message: Message, state: FSMContext) -> None:
-    await state.clear()
-    await message.answer(texts.APPLICATION_CANCELLED, reply_markup=main_menu())
+# «❌ Отмена» обрабатывается глобально в handlers/start.py (инвариантно к FSM-состоянию).
 
 
 # --- Шаги анкеты ---

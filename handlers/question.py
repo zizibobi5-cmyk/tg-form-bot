@@ -43,10 +43,7 @@ async def start_question(message: Message, state: FSMContext) -> None:
     await message.answer(texts.ASK_QUESTION_PROMPT, reply_markup=cancel_kb())
 
 
-@router.message(QuestionForm.waiting_text, F.text == texts.BTN_CANCEL)
-async def cancel_question(message: Message, state: FSMContext) -> None:
-    await state.clear()
-    await message.answer(texts.QUESTION_CANCEL, reply_markup=main_menu())
+# «❌ Отмена» обрабатывается глобально в handlers/start.py (инвариантно к FSM-состоянию).
 
 
 @router.message(QuestionForm.waiting_text, F.text)
