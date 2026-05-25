@@ -19,6 +19,7 @@ from db.models import ApplicationStatus
 from db.queries import (
     approve_application,
     ban_user,
+    count_approved_for_user,
     enqueue_channel_publication,
     get_application,
     reject_application,
@@ -132,6 +133,7 @@ async def cb_accept(
             await call.answer(texts.MOD_PUBLISH_FAILED.format(error=str(e)[:100]), show_alert=True)
             return
 
+    prior_approved = await count_approved_for_user(session, app.user_id)
     await approve_application(session, app_id, channel_message_id, moderator_id=call.from_user.id)
     await session.commit()
 
@@ -143,9 +145,10 @@ async def cb_accept(
 
     await call.answer("OK")
 
-    # уведомляем пользователя
+    # уведомляем пользователя: приветствие с ссылками только тем, у кого это первая анкета.
+    notify_text = texts.USER_ACCEPTED_FIRST if prior_approved == 0 else texts.USER_ACCEPTED_REPEAT
     try:
-        await bot.send_message(chat_id=app.user_id, text=texts.USER_ACCEPTED)
+        await bot.send_message(chat_id=app.user_id, text=notify_text)
     except TelegramAPIError as e:
         logger.warning("Failed to notify user %s: %s", app.user_id, e)
 
