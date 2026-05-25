@@ -36,3 +36,47 @@ services:
         value: "5"
       - key: CHANNEL_DELAY_BEFORE_PHOTOS
         value: "15"
+      # Если true, бот не публикует в канал сам, а кладёт задачу в очередь
+      # для Telethon-юзербота (см. сервис tg-form-userbot ниже).
+      - key: USERBOT_ENABLED
+        value: "false"
+
+  # Telethon-юзербот: публикует анкеты в канал от Premium-аккаунта,
+  # чтобы сохранять премиум/кастомные эмодзи (Telegram режет их у ботов).
+  # Использует ту же базу Neon, что и tg-form-bot, читает очередь
+  # channel_publications и публикует через MTProto.
+  - type: web
+    name: tg-form-userbot
+    runtime: python
+    plan: free
+    region: frankfurt
+    branch: main
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m userbot.main
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      # Берутся на https://my.telegram.org → API development tools.
+      - key: TELEGRAM_API_ID
+        sync: false
+      - key: TELEGRAM_API_HASH
+        sync: false
+      # Сгенерировать локально через scripts/generate_session.py.
+      # Хранится только тут, в код не коммитится.
+      - key: TELEGRAM_SESSION
+        sync: false
+      # Те же значения, что и у tg-form-bot.
+      - key: CHANNEL_ID
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: CHANNEL_DELAY_BETWEEN_TEXTS
+        value: "5"
+      - key: CHANNEL_DELAY_BEFORE_PHOTOS
+        value: "15"
+      - key: USERBOT_POLL_INTERVAL
+        value: "5"
+      - key: USERBOT_LOG_LEVEL
+        value: "INFO"

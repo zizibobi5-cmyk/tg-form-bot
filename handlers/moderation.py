@@ -1,7 +1,6 @@
 """Хэндлеры модерации анкет."""
 from __future__ import annotations
 
-import json
 import logging
 
 from aiogram import Bot, F, Router
@@ -20,13 +19,14 @@ from db.models import ApplicationStatus
 from db.queries import (
     approve_application,
     ban_user,
+    enqueue_channel_publication,
     get_application,
     reject_application,
 )
 from keyboards.user import resend_kb
 from states.moderation import ModerationFlow
 from utils.formatting import render_application
-from utils.messaging import copy_emoji_fields, send_application_messages
+from utils.messaging import send_application_messages
 from utils.permissions import is_authorized_moderator
 
 logger = logging.getLogger(__name__)
@@ -35,6 +35,20 @@ router = Router(name="moderation")
 
 def _is_mod_chat(chat_id: int) -> bool:
     return chat_id == get_settings().moderator_chat_id
+
+
+async def _download_photos(bot: Bot, photo_file_ids: list[str]) -> list[bytes]:
+    """Скачивает байты фото из Bot API. Нужно, чтобы передать их юзерботу через БД:
+    Bot API file_id не работают в MTProto/Telethon, поэтому шлём raw bytes.
+    """
+    import io as _io
+
+    blobs: list[bytes] = []
+    for fid in photo_file_ids:
+        buf = _io.BytesIO()
+        await bot.download(fid, destination=buf)
+        blobs.append(buf.getvalue())
+    return blobs
 
 
 @router.callback_query(F.data.startswith("mod:accept:"))
@@ -81,58 +95,42 @@ async def cb_accept(
     photo_ids = [p.file_id for p in app.photos]
 
     channel_message_id: int | None = None
-    try:
-        sent_ids, _ = await send_application_messages(
-            bot,
-            settings.channel_id,
-            body,
-            photo_ids,
-            text_first=True,
-            delay_between_texts=settings.channel_delay_between_texts,
-            delay_before_photos=settings.channel_delay_before_photos,
-        )
-        if sent_ids:
-            channel_message_id = sent_ids[0]
-    except TelegramAPIError as e:
-        logger.exception("Failed to publish to channel: %s", e)
-        await call.answer(texts.MOD_PUBLISH_FAILED.format(error=str(e)[:100]), show_alert=True)
-        return
-
-    # Telegram режет custom_emoji в постах ботов на каналах. Для полей анкеты,
-    # где у пользователя были премиум-эмодзи, дополнительно копируем
-    # оригинальное сообщение из приватного чата через copy_message — копирование
-    # сохраняет все entities, включая custom_emoji.
-    if app.user_chat_id and app.field_message_ids:
+    if settings.userbot_enabled:
+        # Новый путь: публикует Telethon-юзербот отдельным сервисом.
+        # Кладём в очередь, скачав байты фото из Bot API (file_id Bot API не работают
+        # в MTProto). channel_message_id будет проставлен юзерботом после фактической
+        # публикации.
         try:
-            field_msg_ids: dict[str, int] = {
-                str(k): int(v) for k, v in json.loads(app.field_message_ids).items()
-            }
-        except (ValueError, TypeError) as e:
-            logger.warning("Failed to parse field_message_ids for app %s: %s", app.id, e)
-            field_msg_ids = {}
-        if field_msg_ids:
-            field_html_map: dict[str, str | None] = {
-                "name_surname": app.name_surname,
-                "age_height": app.age_height,
-                "magic_abilities": app.magic_abilities,
-                "character": app.character,
-                "biography": app.biography,
-                "interesting_facts": app.interesting_facts,
-                "work_position": app.work_position,
-                "place_of_living": app.place_of_living,
-                "roll": app.roll,
-            }
-            try:
-                await copy_emoji_fields(
-                    bot,
-                    chat_id=settings.channel_id,
-                    user_chat_id=int(app.user_chat_id),
-                    field_message_ids=field_msg_ids,
-                    field_html_map=field_html_map,
-                    header="💎 <b>Премиум-эмодзи (оригинал):</b>",
-                )
-            except TelegramAPIError as e:
-                logger.warning("Emoji-field copy step failed for app %s: %s", app.id, e)
+            photo_blobs = await _download_photos(bot, photo_ids)
+        except TelegramAPIError as e:
+            logger.exception("Failed to download photos for queueing: %s", e)
+            await call.answer(texts.MOD_PUBLISH_FAILED.format(error=str(e)[:100]), show_alert=True)
+            return
+        await enqueue_channel_publication(
+            session,
+            application_id=app_id,
+            body_html=body,
+            photo_bytes=photo_blobs,
+        )
+    else:
+        # Старый путь (fallback, когда USERBOT_ENABLED=0): бот сам публикует в канал,
+        # но премиум-эмодзи будут резаться (это ограничение Telegram для ботов).
+        try:
+            sent_ids, _ = await send_application_messages(
+                bot,
+                settings.channel_id,
+                body,
+                photo_ids,
+                text_first=True,
+                delay_between_texts=settings.channel_delay_between_texts,
+                delay_before_photos=settings.channel_delay_before_photos,
+            )
+            if sent_ids:
+                channel_message_id = sent_ids[0]
+        except TelegramAPIError as e:
+            logger.exception("Failed to publish to channel: %s", e)
+            await call.answer(texts.MOD_PUBLISH_FAILED.format(error=str(e)[:100]), show_alert=True)
+            return
 
     await approve_application(session, app_id, channel_message_id, moderator_id=call.from_user.id)
     await session.commit()

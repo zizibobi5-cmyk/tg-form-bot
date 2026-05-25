@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from db.models import Application, ApplicationPhoto, ApplicationStatus, Moderator, Question, User
+
+if TYPE_CHECKING:
+    from db.models import ChannelPublication
 
 
 # --- Users ---
@@ -310,3 +314,141 @@ async def answer_question(session: AsyncSession, q_id: int, answer: str) -> Ques
 
 async def get_question(session: AsyncSession, q_id: int) -> Question | None:
     return await session.get(Question, q_id)
+
+
+# --- Channel publications queue (Telethon userbot) ---
+
+async def enqueue_channel_publication(
+    session: AsyncSession,
+    application_id: int,
+    body_html: str,
+    photo_bytes: list[bytes],
+) -> "ChannelPublication":
+    """Кладёт задачу на публикацию анкеты в канал в очередь юзербота.
+
+    photo_bytes — список байтовых блобов в том же порядке, в котором они должны
+    появиться в медиагруппе. Если список пуст — публикуется только текст.
+    """
+    from db.models import ChannelPublication, ChannelPublicationPhoto, ChannelPublicationStatus
+
+    pub = ChannelPublication(
+        application_id=application_id,
+        body_html=body_html,
+        status=ChannelPublicationStatus.PENDING,
+    )
+    session.add(pub)
+    await session.flush()
+    for idx, blob in enumerate(photo_bytes):
+        session.add(ChannelPublicationPhoto(publication_id=pub.id, position=idx, data=blob))
+    await session.flush()
+    return pub
+
+
+async def claim_next_publication(
+    session: AsyncSession,
+    *,
+    stale_after_seconds: int = 300,
+    max_attempts: int = 5,
+) -> "ChannelPublication | None":
+    """Атомарно захватывает следующую pending-публикацию и переводит в in_progress.
+
+    Используется на стороне юзербота. ``stale_after_seconds`` — TTL для зависшей
+    задачи в in_progress: если воркер упал между ``claim`` и ``mark_published``,
+    задача снова станет доступна через этот таймаут. ``max_attempts`` ограничивает
+    число повторов после ошибок.
+    """
+    from datetime import datetime, timedelta
+
+    from sqlalchemy.orm import selectinload as _selectinload
+
+    from db.models import ChannelPublication, ChannelPublicationStatus
+
+    cutoff = datetime.utcnow() - timedelta(seconds=stale_after_seconds)
+    # Сначала возвращаем зависшие in_progress (если воркер их захватил, но не дожил
+    # до mark_published). На уровне БД безопаснее всего: SELECT ... FOR UPDATE SKIP LOCKED.
+    # Используем универсальный путь (SQLAlchemy эмулирует на SQLite), потому что
+    # пока в проекте один воркер — гонок не будет.
+    res = await session.execute(
+        select(ChannelPublication)
+        .where(
+            (ChannelPublication.status == ChannelPublicationStatus.PENDING)
+            | (
+                (ChannelPublication.status == ChannelPublicationStatus.IN_PROGRESS)
+                & (ChannelPublication.claimed_at < cutoff)
+            )
+        )
+        .where(ChannelPublication.attempts < max_attempts)
+        .order_by(ChannelPublication.id.asc())
+        .options(_selectinload(ChannelPublication.photos))
+        .limit(1)
+    )
+    pub = res.scalar_one_or_none()
+    if pub is None:
+        return None
+    pub.status = ChannelPublicationStatus.IN_PROGRESS
+    pub.claimed_at = datetime.utcnow()
+    pub.attempts = (pub.attempts or 0) + 1
+    return pub
+
+
+async def mark_publication_published(
+    session: AsyncSession,
+    pub_id: int,
+    channel_message_id: int | None,
+) -> None:
+    """Помечает публикацию как успешно отправленную."""
+    from db.models import ChannelPublication, ChannelPublicationStatus
+
+    await session.execute(
+        update(ChannelPublication)
+        .where(ChannelPublication.id == pub_id)
+        .values(
+            status=ChannelPublicationStatus.PUBLISHED,
+            channel_message_id=channel_message_id,
+            last_error=None,
+        )
+    )
+
+
+async def mark_publication_failed(
+    session: AsyncSession,
+    pub_id: int,
+    error: str,
+    *,
+    permanent: bool = False,
+) -> None:
+    """Помечает публикацию как сбойную. Если permanent=True или превышен max_attempts —
+    статус ``failed``; иначе ``pending`` (будет повтор)."""
+    from db.models import ChannelPublication, ChannelPublicationStatus
+
+    new_status = ChannelPublicationStatus.FAILED if permanent else ChannelPublicationStatus.PENDING
+    await session.execute(
+        update(ChannelPublication)
+        .where(ChannelPublication.id == pub_id)
+        .values(status=new_status, last_error=error[:2000])
+    )
+
+
+async def count_pending_publications(session: AsyncSession) -> int:
+    """Сколько задач ждёт в очереди (диагностика)."""
+    from db.models import ChannelPublication, ChannelPublicationStatus
+
+    res = await session.execute(
+        select(func.count(ChannelPublication.id)).where(
+            ChannelPublication.status.in_(
+                [ChannelPublicationStatus.PENDING, ChannelPublicationStatus.IN_PROGRESS]
+            )
+        )
+    )
+    return int(res.scalar_one())
+
+
+async def set_application_channel_message(
+    session: AsyncSession, app_id: int, channel_message_id: int
+) -> None:
+    """Сохраняет message_id опубликованного поста в канале — нужно для статистики/удаления."""
+    await session.execute(
+        update(Application)
+        .where(Application.id == app_id)
+        .values(channel_message_id=channel_message_id)
+    )

@@ -4,7 +4,7 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, ForeignKey, Integer, LargeBinary, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db.base import Base
@@ -14,6 +14,13 @@ class ApplicationStatus(str, enum.Enum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
+
+
+class ChannelPublicationStatus(str, enum.Enum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    PUBLISHED = "published"
+    FAILED = "failed"
 
 
 class User(Base):
@@ -110,3 +117,59 @@ class Question(Base):
     answered: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     answer_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+
+class ChannelPublication(Base):
+    """Очередь публикаций в Telegram-канал, обслуживаемая Telethon-юзерботом.
+
+    Анкетный бот при принятии анкеты модератором кладёт сюда задачу, а
+    отдельный сервис ``userbot.main`` (Telethon, логин под Premium-аккаунтом)
+    забирает её и публикует в канал — это сохраняет премиум-эмодзи, которые
+    Telegram режет у сообщений ботов.
+    """
+
+    __tablename__ = "channel_publications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    application_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("applications.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    body_html: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[ChannelPublicationStatus] = mapped_column(
+        Enum(ChannelPublicationStatus, native_enum=False, length=16),
+        default=ChannelPublicationStatus.PENDING,
+        nullable=False,
+        index=True,
+    )
+    attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    channel_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # время, когда воркер захватил задачу: используется для детекции зависших задач
+    # (если задача застряла в in_progress дольше TTL — её можно вернуть в pending).
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    photos: Mapped[list["ChannelPublicationPhoto"]] = relationship(
+        back_populates="publication",
+        cascade="all, delete-orphan",
+        order_by="ChannelPublicationPhoto.position",
+    )
+
+
+class ChannelPublicationPhoto(Base):
+    """Бинарные данные фото для публикации. Бот скачивает оригинал через bot.get_file
+    и кладёт байты сюда, потому что Bot API file_id не работают в Telethon (MTProto)."""
+
+    __tablename__ = "channel_publication_photos"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    publication_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("channel_publications.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+
+    publication: Mapped["ChannelPublication"] = relationship(back_populates="photos")

@@ -88,6 +88,13 @@ def _get_str(name: str, default: str | None = None, required: bool = False) -> s
     return raw
 
 
+def _get_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on", "y"}
+
+
 @dataclass(slots=True)
 class Settings:
     bot_token: str
@@ -103,6 +110,9 @@ class Settings:
     channel_delay_between_texts: float
     channel_delay_before_photos: float
     http_port: int
+    # Если True, бот не публикует анкеты напрямую в канал, а складывает в очередь для Telethon-юзербота.
+    # Юзербот публикует от Premium-аккаунта и сохраняет custom_emoji.
+    userbot_enabled: bool
     data_dir: Path = field(default_factory=lambda: BASE_DIR / "data")
 
     @property
@@ -127,6 +137,7 @@ class Settings:
             channel_delay_between_texts=_get_float("CHANNEL_DELAY_BETWEEN_TEXTS", default=5.0),
             channel_delay_before_photos=_get_float("CHANNEL_DELAY_BEFORE_PHOTOS", default=15.0),
             http_port=_get_int("PORT", default=8080),
+            userbot_enabled=_get_bool("USERBOT_ENABLED", default=False),
         )
         if settings.is_sqlite:
             settings.data_dir.mkdir(parents=True, exist_ok=True)

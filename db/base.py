@@ -72,3 +72,11 @@ async def init_db() -> None:
                     "ALTER TABLE applications ADD COLUMN IF NOT EXISTS field_message_ids TEXT"
                 )
             )
+            # Колонка claimed_at появилась вместе с очередью публикаций для юзербота.
+            # create_all создаёт таблицу целиком, но если она уже была (например, после
+            # ранних версий миграции) — нам всё равно нужно убедиться, что колонка есть.
+            await conn.execute(
+                _sql_text(
+                    "ALTER TABLE channel_publications ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMP"
+                )
+            )
