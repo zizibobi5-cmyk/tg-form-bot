@@ -21,6 +21,7 @@ from db.queries import (
 from keyboards.moderator import moderation_kb
 from keyboards.user import (
     cancel_kb,
+    long_field_kb,
     main_menu,
     photos_kb,
     preview_kb,
@@ -56,6 +57,9 @@ async def _start_application_flow(message: Message, state: FSMContext, session: 
 
     await state.clear()
     await state.set_state(ApplicationForm.name_surname)
+    # при новом старте анкеты сбрасываем все накопленные чанки прошлых длинных полей
+    for _f in LONG_FIELDS:
+        await _long_field_clear(state, _f)
     await message.answer(texts.ASK_NAME_SURNAME, reply_markup=cancel_kb())
 
 
@@ -130,6 +134,111 @@ async def _remember_origin(message: Message, state: FSMContext, field: str) -> N
     await state.update_data(_field_msg_ids=field_msg_ids, _user_chat_id=message.chat.id)
 
 
+# --- Многосообщенческий ввод для длинных полей (магия / характер / биография) ---
+# Идея: пользователь может отправить текст несколькими сообщениями подряд.
+# Это решает проблему: Telegram автоматически режет вставки >4096 символов на
+# несколько сообщений — раньше это приводило к тому, что второй кусок
+# принимался ботом как следующее поле.
+
+LONG_FIELDS: dict[str, int] = {
+    "magic_abilities": texts.MAGIC_MAX,
+    "character": texts.CHARACTER_MAX,
+    "biography": texts.BIOGRAPHY_MAX,
+}
+
+_CHUNK_SEPARATOR = "\n\n"
+
+
+def _chunks_keys(field: str) -> tuple[str, str, str]:
+    """Ретёрнит (chunks_key, visible_key, first_msg_key) для FSM-данных."""
+    return (
+        f"_{field}_chunks_html",
+        f"_{field}_visible_total",
+        f"_{field}_first_msg_id",
+    )
+
+
+async def _long_field_capture(
+    message: Message, state: FSMContext, *, field: str, limit: int
+) -> int | None:
+    """Обрабатывает очередное текстовое сообщение на длинном поле.
+
+    Возвращает видимую длину накопленного текста после добавления, или None,
+    если сообщение отклонено (пустое или выходит за лимит) — в этом случае
+    вызыватель сам сообщит пользователю.
+    """
+    text, html = _capture(message)
+    if not text:
+        await message.answer(texts.NAME_EMPTY)
+        return None
+
+    chunks_key, visible_key, first_msg_key = _chunks_keys(field)
+    data = await state.get_data()
+    chunks: list[str] = list(data.get(chunks_key) or [])
+    visible_total: int = int(data.get(visible_key) or 0)
+    first_msg_id = data.get(first_msg_key)
+
+    separator_chars = len(_CHUNK_SEPARATOR) if chunks else 0
+    new_total = visible_total + separator_chars + len(text)
+
+    if new_total > limit:
+        await message.answer(
+            texts.LONG_FIELD_TOO_LONG_ADD.format(actual=new_total, limit=limit)
+        )
+        return None
+
+    chunks.append(html)
+    update: dict[str, object] = {
+        chunks_key: chunks,
+        visible_key: new_total,
+    }
+    if first_msg_id is None and len(chunks) == 1:
+        update[first_msg_key] = message.message_id
+        update["_user_chat_id"] = message.chat.id
+    await state.update_data(**update)
+    return new_total
+
+
+async def _long_field_clear(state: FSMContext, field: str) -> None:
+    chunks_key, visible_key, first_msg_key = _chunks_keys(field)
+    await state.update_data(
+        **{chunks_key: [], visible_key: 0, first_msg_key: None}
+    )
+
+
+async def _long_field_finalize(
+    state: FSMContext, field: str
+) -> tuple[bool, str | None, str | None, int]:
+    """Собирает накопленные куски в итоговый HTML.
+
+    Возвращает (ok, error, joined_html, visible_total). Если ok=True,
+    также выставляет _field_msg_ids[field] для случая одного куска (чтобы
+    для премиум-эмодзи модераторам скопировать оригинал через copy_message).
+    """
+    chunks_key, visible_key, first_msg_key = _chunks_keys(field)
+    data = await state.get_data()
+    chunks: list[str] = list(data.get(chunks_key) or [])
+    visible_total: int = int(data.get(visible_key) or 0)
+    first_msg_id = data.get(first_msg_key)
+
+    if not chunks:
+        return False, texts.LONG_FIELD_EMPTY, None, 0
+
+    joined = _CHUNK_SEPARATOR.join(chunks)
+
+    if len(chunks) == 1 and isinstance(first_msg_id, int):
+        field_msg_ids: dict[str, int] = dict(data.get("_field_msg_ids") or {})
+        field_msg_ids[field] = first_msg_id
+        await state.update_data(
+            _field_msg_ids=field_msg_ids, _user_chat_id=data.get("_user_chat_id"),
+        )
+
+    await state.update_data(
+        **{chunks_key: None, visible_key: None, first_msg_key: None}
+    )
+    return True, None, joined, visible_total
+
+
 @router.message(ApplicationForm.name_surname, F.text)
 async def step_name_surname(message: Message, state: FSMContext) -> None:
     text, html = _capture(message)
@@ -153,46 +262,119 @@ async def step_age_height(message: Message, state: FSMContext) -> None:
     await state.update_data(age_height=html)
     await _remember_origin(message, state, "age_height")
     await state.set_state(ApplicationForm.magic_abilities)
-    await message.answer(texts.ASK_MAGIC, reply_markup=cancel_kb())
+    await message.answer(texts.ASK_MAGIC, reply_markup=long_field_kb())
+
+
+# --- Магия (длинное поле, многосообщенческий ввод) ---
+
+
+@router.message(ApplicationForm.magic_abilities, F.text == texts.BTN_LONG_CLEAR)
+async def step_magic_clear(message: Message, state: FSMContext) -> None:
+    await _long_field_clear(state, "magic_abilities")
+    await message.answer(texts.LONG_FIELD_CLEARED, reply_markup=long_field_kb())
+
+
+@router.message(ApplicationForm.magic_abilities, F.text == texts.BTN_LONG_DONE)
+async def step_magic_done(message: Message, state: FSMContext) -> None:
+    ok, err, joined, _ = await _long_field_finalize(state, "magic_abilities")
+    if not ok:
+        await message.answer(err or texts.ERROR_GENERIC, reply_markup=long_field_kb())
+        return
+    await state.update_data(magic_abilities=joined)
+    await state.set_state(ApplicationForm.character)
+    await message.answer(texts.ASK_CHARACTER, reply_markup=long_field_kb())
 
 
 @router.message(ApplicationForm.magic_abilities, F.text)
 async def step_magic(message: Message, state: FSMContext) -> None:
-    text, html = _capture(message)
-    ok, err = _validate_text(text, limit=texts.MAGIC_MAX)
-    if not ok:
-        await message.answer(err or texts.ERROR_GENERIC)
+    new_total = await _long_field_capture(
+        message, state, field="magic_abilities", limit=texts.MAGIC_MAX
+    )
+    if new_total is None:
         return
-    await state.update_data(magic_abilities=html)
-    await _remember_origin(message, state, "magic_abilities")
-    await state.set_state(ApplicationForm.character)
-    await message.answer(texts.ASK_CHARACTER, reply_markup=cancel_kb())
+    await message.answer(
+        texts.LONG_FIELD_PROGRESS.format(chars=new_total, limit=texts.MAGIC_MAX),
+        reply_markup=long_field_kb(),
+    )
+
+
+# --- Характер (длинное поле, многосообщенческий ввод) ---
+
+
+@router.message(ApplicationForm.character, F.text == texts.BTN_LONG_CLEAR)
+async def step_character_clear(message: Message, state: FSMContext) -> None:
+    await _long_field_clear(state, "character")
+    await message.answer(texts.LONG_FIELD_CLEARED, reply_markup=long_field_kb())
+
+
+@router.message(ApplicationForm.character, F.text == texts.BTN_LONG_DONE)
+async def step_character_done(message: Message, state: FSMContext) -> None:
+    ok, err, joined, _ = await _long_field_finalize(state, "character")
+    if not ok:
+        await message.answer(err or texts.ERROR_GENERIC, reply_markup=long_field_kb())
+        return
+    await state.update_data(character=joined)
+    await state.set_state(ApplicationForm.biography)
+    await message.answer(texts.ASK_BIOGRAPHY, reply_markup=long_field_kb())
 
 
 @router.message(ApplicationForm.character, F.text)
 async def step_character(message: Message, state: FSMContext) -> None:
-    text, html = _capture(message)
-    ok, err = _validate_text(text, limit=texts.CHARACTER_MAX)
-    if not ok:
-        await message.answer(err or texts.ERROR_GENERIC)
+    new_total = await _long_field_capture(
+        message, state, field="character", limit=texts.CHARACTER_MAX
+    )
+    if new_total is None:
         return
-    await state.update_data(character=html)
-    await _remember_origin(message, state, "character")
-    await state.set_state(ApplicationForm.biography)
-    await message.answer(texts.ASK_BIOGRAPHY, reply_markup=cancel_kb())
+    await message.answer(
+        texts.LONG_FIELD_PROGRESS.format(chars=new_total, limit=texts.CHARACTER_MAX),
+        reply_markup=long_field_kb(),
+    )
+
+
+# --- Биография (длинное поле, многосообщенческий ввод + минимум) ---
+
+
+@router.message(ApplicationForm.biography, F.text == texts.BTN_LONG_CLEAR)
+async def step_biography_clear(message: Message, state: FSMContext) -> None:
+    await _long_field_clear(state, "biography")
+    await message.answer(texts.LONG_FIELD_CLEARED, reply_markup=long_field_kb())
+
+
+@router.message(ApplicationForm.biography, F.text == texts.BTN_LONG_DONE)
+async def step_biography_done(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    chunks_key, visible_key, _ = _chunks_keys("biography")
+    chunks: list[str] = list(data.get(chunks_key) or [])
+    visible_total: int = int(data.get(visible_key) or 0)
+    if not chunks:
+        await message.answer(texts.LONG_FIELD_EMPTY, reply_markup=long_field_kb())
+        return
+    if visible_total < texts.BIOGRAPHY_MIN:
+        await message.answer(
+            texts.BIOGRAPHY_TOO_SHORT.format(actual=visible_total),
+            reply_markup=long_field_kb(),
+        )
+        return
+    ok, err, joined, _ = await _long_field_finalize(state, "biography")
+    if not ok:
+        await message.answer(err or texts.ERROR_GENERIC, reply_markup=long_field_kb())
+        return
+    await state.update_data(biography=joined)
+    await state.set_state(ApplicationForm.interesting_facts)
+    await message.answer(texts.ASK_FACTS, reply_markup=skip_cancel_kb())
 
 
 @router.message(ApplicationForm.biography, F.text)
 async def step_biography(message: Message, state: FSMContext) -> None:
-    text, html = _capture(message)
-    ok, err = _validate_text(text, limit=texts.BIOGRAPHY_MAX, min_len=texts.BIOGRAPHY_MIN)
-    if not ok:
-        await message.answer(err or texts.ERROR_GENERIC)
+    new_total = await _long_field_capture(
+        message, state, field="biography", limit=texts.BIOGRAPHY_MAX
+    )
+    if new_total is None:
         return
-    await state.update_data(biography=html)
-    await _remember_origin(message, state, "biography")
-    await state.set_state(ApplicationForm.interesting_facts)
-    await message.answer(texts.ASK_FACTS, reply_markup=skip_cancel_kb())
+    await message.answer(
+        texts.LONG_FIELD_PROGRESS.format(chars=new_total, limit=texts.BIOGRAPHY_MAX),
+        reply_markup=long_field_kb(),
+    )
 
 
 @router.message(ApplicationForm.interesting_facts, F.text == texts.BTN_SKIP)
