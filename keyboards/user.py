@@ -30,6 +30,18 @@ def photos_kb() -> ReplyKeyboardMarkup:
     )
 
 
+def long_field_kb() -> ReplyKeyboardMarkup:
+    """Клавиатура для длинных полей: можно прислать несколько сообщений,
+    «Готово» завершает шаг, «Очистить текст» сбрасывает накопленный ввод."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=texts.BTN_LONG_DONE)],
+            [KeyboardButton(text=texts.BTN_LONG_CLEAR), KeyboardButton(text=texts.BTN_CANCEL)],
+        ],
+        resize_keyboard=True,
+    )
+
+
 def cancel_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=texts.BTN_CANCEL)]],
